@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description:
+  'CloudSpace Academy home work on Cloudformation Cross Stack Referencing.
+  Using a network template provided by Cloudio.
+  This template provisions an EC2 instance with userdata in the subnet and EC2 Security Group
+  provisioned in a seperate stack known as the "networkStack".'
+
+# Metadata:
+
+Parameters:
+  NetworkStackName:
+    Description:
+      Name of an active CloudFormation stack that contains the networking
+      resources that are referenced in this template, including the subnetID and SecurityGroupID.
+    Type: String
+    Default: SampleNetworkCrossStack
+
+  MyTagsName:
+    Description: Name of tags.
+    Type: String
+    Default: HomeWork3Apps-Stack
+
+  KeyName:
+    Description: Name of an existing (valid) EC2 KeyPair to enable SSH access to the instances
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+
+  InstanceType:
+    Description: My EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - m1.small
+      - m1.medium
+      - m1.large
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instances
+    Type: String
+    MinLength: "9"
+    MaxLength: "18"
+    Default: 0.0.0.0/0
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+Mappings:
+  AWSRegionArch2AMI:
+    us-east-1:
+      PV64: ami-05a91a726af26a821
+      HVM64: ami-0beafb294c86717a8
+      HVMG2: ami-02354e95b39ca8dec
+    us-west-2:
+      PV64: ami-eff1028f
+      HVM64: ami-094125af156557ca2
+      #HVM64: ami-d0f506b0
+      HVMG2: ami-ee897b8e
+    us-west-1:
+      PV64: ami-ac85fbcc
+      HVM64: ami-6e84fa0e
+      HVMG2: ami-69106909
+
+Resources:
+  MyEC2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !FindInMap
+        - AWSRegionArch2AMI
+        - Ref: AWS::Region
+        - HVM64
+
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y httpd
+          systemctl start httpd
+          systemctl enable httpd
+          echo "<html><body><h1>My Fun CloudFormation HomeWork-3, showing on a Server Launched in the ${AWS::Region}-Region</h1></body></html>" > /var/www/html/index.html
+
+      NetworkInterfaces:
+        - GroupSet:
+            - Fn::ImportValue: !Sub "${NetworkStackName}-SecurityGroupID"
+          SubnetId:
+            Fn::ImportValue: !Sub "${NetworkStackName}-SubnetID"
+          DeviceIndex: "0"
+      Tags:
+        - Key: "Name"
+          Value: !Sub ${MyTagsName}-Server
+
+  MyEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref MyEC2Instance
+      Tags:
+        - Key: "Name"
+          Value: !Sub ${MyTagsName}-EIP
+
+Outputs:
+  WebsiteURL:
+    Value: !Sub "http://${MyEC2Instance.PublicDnsName}"
+    Description: URL for newly created webserver
+
+  PublicIP:
+    Description: Public IP address of the web server
+    Value: !GetAtt MyEC2Instance.PublicIp
+
+  PrivateIPv4:
+    Description: Private IP address of the web server
+    Value: !GetAtt MyEC2Instance.PrivateIp
